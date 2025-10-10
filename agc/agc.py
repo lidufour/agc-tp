@@ -26,13 +26,13 @@ from typing import Iterator, Dict, List
 # ftp://ftp.ncbi.nih.gov/blast/matrices/
 import nwalign3 as nw
 
-__author__ = "Your Name"
-__copyright__ = "Universite Paris Diderot"
-__credits__ = ["Your Name"]
+__author__ = "Laura DUFOUR"
+__copyright__ = "Universite Paris Cite"
+__credits__ = ["Laura DUFOUR"]
 __license__ = "GPL"
 __version__ = "1.0.0"
-__maintainer__ = "Your Name"
-__email__ = "your@email.fr"
+__maintainer__ = "Laura DUFOUR"
+__email__ = "laura.dufour@etu.u-paris.fr"
 __status__ = "Developpement"
 
 
@@ -83,7 +83,21 @@ def read_fasta(amplicon_file: Path, minseqlen: int) -> Iterator[str]:
     :param minseqlen: (int) Minimum amplicon sequence length
     :return: A generator object that provides the Fasta sequences (str).
     """
-    pass
+    with gzip.open(amplicon_file, "rt") as monfich:
+        seq = ""
+        for line in monfich:
+            line = line.strip()
+            if line is None:
+                continue
+            if not line.startswith(">"):
+                seq += line.upper()
+            else:
+                if len(seq) >= minseqlen:
+                    yield seq
+                seq = ""
+        if len(seq) >= minseqlen:
+            yield seq
+            
 
 
 def dereplication_fulllength(amplicon_file: Path, minseqlen: int, mincount: int) -> Iterator[List]:
@@ -94,7 +108,21 @@ def dereplication_fulllength(amplicon_file: Path, minseqlen: int, mincount: int)
     :param mincount: (int) Minimum amplicon count
     :return: A generator object that provides a (list)[sequences, count] of sequence with a count >= mincount and a length >= minseqlen.
     """
-    pass
+    dic_uniqseq = {}
+
+    for seq in read_fasta(amplicon_file,minseqlen):
+        if seq not in dic_uniqseq:
+            dic_uniqseq[seq] = 1
+        else:
+            dic_uniqseq[seq] += 1
+    
+    # on stocke les clés ordonnées en output de sorted dans une liste
+    ordered_seqlist = sorted(dic_uniqseq, key = dic_uniqseq.get, reverse = True) 
+
+    for seq in ordered_seqlist:
+        if dic_uniqseq[seq] >= mincount:
+            yield [seq, dic_uniqseq[seq]]
+
 
 def get_identity(alignment_list: List[str]) -> float:
     """Compute the identity rate between two sequences
@@ -138,7 +166,10 @@ def main(): # pragma: no cover
     args = get_arguments()
     # Votre programme ici
 
-
+    dico = dereplication_fulllength(amplicon_file=args.amplicon_file,
+                                    minseqlen=args.minseqlen,
+                                    mincount=args.mincount)
+    print(len(list(dico)))
 
 if __name__ == '__main__':
     main()

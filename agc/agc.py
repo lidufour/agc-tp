@@ -26,6 +26,14 @@ from typing import Iterator, Dict, List
 # ftp://ftp.ncbi.nih.gov/blast/matrices/
 import nwalign3 as nw
 
+# --- Compatibilité NumPy 2.0+ : réintroduire les alias supprimés ---
+import numpy as np
+
+# Compat NumPy 2.0+ : ne patcher QUE np.int, sans accéder aux autres alias dépréciés
+if 'int' not in np.__dict__:
+    np.int = int  # type: ignore[attr-defined]
+
+
 __author__ = "Laura DUFOUR"
 __copyright__ = "Universite Paris Cite"
 __credits__ = ["Laura DUFOUR"]
@@ -130,7 +138,16 @@ def get_identity(alignment_list: List[str]) -> float:
     :param alignment_list:  (list) A list of aligned sequences in the format ["SE-QUENCE1", "SE-QUENCE2"]
     :return: (float) The rate of identity between the two sequences.
     """
-    pass
+    seq1 = alignment_list[0]
+    seq2 = alignment_list[1]
+
+    nb_same_nct = 0 # nombre de nucléotides identiques
+    for idx, nclt_s1 in enumerate(seq1):
+        if nclt_s1 == seq2[idx]:
+            nb_same_nct += 1
+    score_id = 100 * (nb_same_nct/len(max(alignment_list)))
+
+    return score_id
 
 def abundance_greedy_clustering(amplicon_file: Path, minseqlen: int, mincount: int, chunk_size: int, kmer_size: int) -> List:
     """Compute an abundance greedy clustering regarding sequence count and identity.
@@ -143,7 +160,33 @@ def abundance_greedy_clustering(amplicon_file: Path, minseqlen: int, mincount: i
     :param kmer_size: (int) A fournir mais non utilise cette annee
     :return: (list) A list of all the [OTU (str), count (int)] .
     """
-    pass
+    otu_list: List = []
+    subs_matrix_path = str(Path(__file__).parent / "MATCH")
+
+    gen = dereplication_fulllength(amplicon_file, minseqlen, mincount)
+
+    # 1) Seed: on prend la séquence la plus abondante comme première OTU
+    try:
+        seq0, c0 = next(gen)
+        otu_list.append([seq0, c0])
+    except StopIteration:
+        return otu_list  # aucun candidat
+
+    # 2) Pour chaque autre séquence, comparer aux OTU existantes
+    for sequence, count in gen:
+        is_new = True
+        for otu_seq, _ in otu_list:
+            aln = nw.global_align(sequence, otu_seq, gap_open=-1, gap_extend=-1,
+                                  matrix=subs_matrix_path)
+            if get_identity(aln) >= 97.0:
+                is_new = False
+                break
+        if is_new:
+            otu_list.append([sequence, count])
+
+    return otu_list
+
+
 
 
 def write_OTU(OTU_list: List, output_file: Path) -> None:
@@ -152,13 +195,14 @@ def write_OTU(OTU_list: List, output_file: Path) -> None:
     :param OTU_list: (list) A list of OTU sequences
     :param output_file: (Path) Path to the output file
     """
-    pass
+    with output_file.open("w") as out:
+        for idx, (seq, count) in enumerate(OTU_list, start=1):
+            out.write(f">OTU_{idx} occurrence:{count}\n")
+            out.write(textwrap.fill(seq, width=80) + "\n")
 
 
-#==============================================================
-# Main program
-#==============================================================
-def main(): # pragma: no cover
+
+def main():
     """
     Main program function
     """
@@ -166,10 +210,16 @@ def main(): # pragma: no cover
     args = get_arguments()
     # Votre programme ici
 
-    dico = dereplication_fulllength(amplicon_file=args.amplicon_file,
-                                    minseqlen=args.minseqlen,
-                                    mincount=args.mincount)
-    print(len(list(dico)))
+    otu_list = abundance_greedy_clustering(
+        amplicon_file=args.amplicon_file,
+        minseqlen=args.minseqlen,
+        mincount=args.mincount,
+        chunk_size=100,  # non utilisé cette année
+        kmer_size=8      # non utilisé cette année
+    )
+
+    write_OTU(otu_list, args.output_file)
+
 
 if __name__ == '__main__':
     main()
